@@ -37,14 +37,13 @@ def_output = '/tmp/fire-anim.html'
 def_audio_output_fmt = "/tmp/fire-{freq:02d}.wav"
 def_noise_min_f = 100  # Default minimum frequency for noise
 def_noise_max_f = 1000  # Default maximum frequency for noise
-available_periods = ['PT1H', 'P1D', 'P1Y']  # Available animation periods
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Generate an animated fire perimeter map.")
 parser.add_argument("-d", "--days-prior", type=int, default=def_days_prior,
                     help=f"Days prior ({def_days_prior})")
-parser.add_argument("-p", "--anim-period", type=str, default=def_anim_period, choices=available_periods,
-                    help=f"Animation period. Options: {', '.join(available_periods)} (default: {def_anim_period})")
+parser.add_argument("-p", "--anim-period", type=str, default=def_anim_period,
+                    help=f"Animation period. (Examples: P1Y, P1D, PT1H) ({def_anim_period})")
 parser.add_argument("-o", "--output", type=str, default=def_output,
                     help=f"Output HTML file ({def_output})")
 parser.add_argument("-P", "--anim-paused", action="store_true",
@@ -117,7 +116,7 @@ with open("/tmp/fire-query.json") as F:
     data = json.load(F)
 
 views = {
-    'overview': {
+    'sf-valley': {
         'zoom': 11,
         'co': [34.1622, -118.3577],
         },
@@ -125,8 +124,20 @@ views = {
         'zoom': 12,
         'co': [34.1422, -118.4577],
         },
+    'usa-ca-la': {
+        'zoom': 10,
+        'co': [34.1022, -118.1577],
+        },
+    'usa-ca-south': {
+        'zoom': 7,
+        'co': [34.1022, -118.1577],
+        },
+    'usa-ca': {
+        'zoom': 6,
+        'co': [34.1022, -118.1577],
+        },
     }
-view = views['palisades']
+view = views['sf-valley']
 
 # Initialize the map centered near Los Angeles
 base_map = folium.Map(location=view['co'], zoom_start=view['zoom'])
@@ -214,6 +225,15 @@ except Exception as e:
     print(f"Error creating TimestampedGeoJson: {e}")
     import ipdb; ipdb.set_trace(context=7); pass
     pass
+# timestamped_geojson
+# {'position': 'bottomleft', 'minSpeed': 0.1, 'maxSpeed': 10, 'autoPlay': True, 'loopButton': False, 'timeSliderDragUpdate': False, 'speedSlider': True, 'playerOptions': {'transitionTime': 200, 'loop': True, 'startOver': True}}
+timestamped_geojson.options['minSpeed']=20
+timestamped_geojson.options['maxSpeed']=50
+timestamped_geojson.options['autoPlay']=False
+timestamped_geojson.options['loopButton=True']=False
+timestamped_geojson.options['timeSliderDragUpdate']=True
+timestamped_geojson.options['playerOptions']['loop']=False
+timestamped_geojson.options['playerOptions']['startOver']=False
 
 # Add the animation layer to the map
 timestamped_geojson.add_to(base_map)
@@ -223,7 +243,7 @@ base_map.save(output_file)
 print(f"Map saved as {output_file}")
 # Inject custom JavaScript for audio playback
 inject_audio_script(output_file, anim_paused)
-print(f"Map injected for audio")
+print(f"Map injected for audio (not presently working)")
 
 # Generate static blips
 generate_static_blips()

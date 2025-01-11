@@ -104,8 +104,8 @@ def inject_audio_script(output_file, anim_paused):
     }});
 
     // Set animation options
-    const options = document.getElementsByClassName('leaflet-timestamped-geojson')[0].options;
-    options.autoPlay = {str(anim_paused).lower() == 'false'}; // Pause if anim_paused is true
+    // const options = document.getElementsByClassName('leaflet-timestamped-geojson')[0].options;
+    // options.autoPlay = {str(anim_paused).lower() == 'false'}; // Pause if anim_paused is true
     </script>
     '''
     with open(output_file, 'a') as f:
@@ -140,8 +140,28 @@ views = {
 view = views['sf-valley']
 
 # Initialize the map centered near Los Angeles
-base_map = folium.Map(location=view['co'], zoom_start=view['zoom'])
-
+base_map = folium.Map(
+        location=view['co'],
+        zoom_start=view['zoom'],
+        # tiles='Stadia.AlidadeSatellite',
+        # tiles='OpenStreetMap',
+        # tiles='https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png',  # Stadia Alidade Satellite tile URL
+        # attr='&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>, <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="http://openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+        )
+# Add the Stadia Alidade Satellite tile layer
+folium.TileLayer(
+    tiles='https://tiles.stadiamaps.com/tiles/alidade_satellite/{z}/{x}/{y}{r}.jpg',
+    attr='&copy; jaggz.h@gmail.com, '
+        'Map &copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; '
+         ,
+    # attr='&copy; CNES, Distribution Airbus DS, © Airbus DS, © PlanetObserver (Contains Copernicus Data) | '
+    #      '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; '
+    #      '<a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; '
+    #      '<a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    min_zoom=0,
+    max_zoom=20,
+    name='Stadia Alidade Satellite',  # Optional name for the layer
+).add_to(base_map)
 # Initialize variables
 mxf = len(data['features'])  # Max features
 fi = mxf - 1  # Start from the end

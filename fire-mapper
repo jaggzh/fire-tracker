@@ -33,8 +33,8 @@ import subprocess
 # Default values
 def_days_prior = 10
 def_anim_period = 'PT1H'
-def_output = 'fire.html'
-def_audio_output_fmt = "au/fire-{freq:02d}.wav"
+def_output = '/tmp/fire-anim.html'
+def_audio_output_fmt = "/tmp/fire-{freq:02d}.wav"
 def_noise_min_f = 100  # Default minimum frequency for noise
 def_noise_max_f = 1000  # Default maximum frequency for noise
 available_periods = ['PT1H', 'P1D', 'P1Y']  # Available animation periods
@@ -47,24 +47,21 @@ parser.add_argument("-p", "--anim-period", type=str, default=def_anim_period, ch
                     help=f"Animation period. Options: {', '.join(available_periods)} (default: {def_anim_period})")
 parser.add_argument("-o", "--output", type=str, default=def_output,
                     help=f"Output HTML file ({def_output})")
+parser.add_argument("-P", "--anim-paused", action="store_true",
+                    help="Pause animation on page load.")
 args = parser.parse_args()
 
 days_prior = args.days_prior
 output_file = args.output
 anim_period = args.anim_period
+anim_paused = args.anim_paused
 
 # Calculate the cutoff timestamp based on days prior
 cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_prior)
 cutoff_ts = cutoff_date.timestamp()
 
 def format_time(ts_s, period):
-    """Format the timestamp based on the animation period."""
     return datetime.datetime.fromtimestamp(ts_s).isoformat()
-    # No need to chop like this stuff here:
-    # if period == 'PT1H': return datetime.datetime.fromtimestamp(ts_s).isoformat()
-    # elif period == 'PT1D': return datetime.datetime.fromtimestamp(ts_s).strftime('%Y-%m-%d')
-    # elif period == 'P1Y': return datetime.datetime.fromtimestamp(ts_s).strftime('%Y')
-    # else: raise ValueError(f"Unsupported animation period: {period}")
 
 def generate_static_blips():
     """Generate white noise audio files for different frequency peaks."""
@@ -74,37 +71,44 @@ def generate_static_blips():
         print(f"Generating static blip for frequency {freq} Hz at {output_path}")
         subprocess.run([
             "sox", "-n", output_path,
-            "synth", "0.05", "noise", "vol", "0.5"
+            "synth", "0.1", "noise", "vol", "0.5"
         ])
     print("Static blips generated.")
 
-def inject_audio_script(output_file):
+def inject_audio_script(output_file, anim_paused):
     """Inject JavaScript for audio playback into the HTML."""
-    custom_script = """
+    custom_script = f'''
     <script>
     // Preload audio files
     const audioFiles = [];
-    for (let i = 0; i <= 9; i++) {
-        audioFiles[i] = new Audio(`au/fire-${String(i).padStart(2, '0')}.wav`);
-    }
+    for (let i = 0; i <= 9; i++) {{
+        audioFiles[i] = new Audio(`/tmp/fire-${{String(i).padStart(2, '0')}}.wav`);
+        audioFiles[i].addEventListener('canplaythrough', () => console.log(`Audio file fire-${{i}}.wav loaded.`));
+        audioFiles[i].addEventListener('error', () => console.error(`Failed to load audio file fire-${{i}}.wav.`));
+    }}
 
     // Play audio when a feature is shown
-    function playFeatureAudio(properties) {
-        const audioIndex = parseInt(properties.audio.match(/fire-(\\d{2})\\.wav/)[1], 10);
-        if (audioFiles[audioIndex]) {
+    function playFeatureAudio(properties) {{
+        const audioIndex = parseInt(properties.audio.match(/fire-(\\d{{2}})\\.wav/)[1], 10);
+        if (audioFiles[audioIndex]) {{
+            console.log(`Playing audio for fire-${{audioIndex}}.wav`);
             audioFiles[audioIndex].currentTime = 0; // Restart the audio
             audioFiles[audioIndex].play();
-        }
-    }
+        }}
+    }}
 
     // Hook into Folium's TimestampedGeoJson events
     const geoJsonLayer = document.getElementsByClassName('leaflet-timestamped-geojson')[0];
-    geoJsonLayer.addEventListener('change', (event) => {
+    geoJsonLayer.addEventListener('change', (event) => {{
         const featureProperties = event.detail.feature.properties;
         playFeatureAudio(featureProperties);
-    });
+    }});
+
+    // Set animation options
+    const options = document.getElementsByClassName('leaflet-timestamped-geojson')[0].options;
+    options.autoPlay = {str(anim_paused).lower() == 'false'}; // Pause if anim_paused is true
     </script>
-    """
+    '''
     with open(output_file, 'a') as f:
         f.write(custom_script)
 
@@ -113,7 +117,7 @@ with open("/tmp/fire-query.json") as F:
     data = json.load(F)
 
 views = {
-    'sfvalley': {
+    'overview': {
         'zoom': 11,
         'co': [34.1622, -118.3577],
         },
@@ -121,20 +125,8 @@ views = {
         'zoom': 12,
         'co': [34.1422, -118.4577],
         },
-    'usa-ca-la': {
-        'zoom': 10,
-        'co': [34.1022, -118.1577],
-        },
-    'usa-ca-south': {
-        'zoom': 7,
-        'co': [34.1022, -118.1577],
-        },
-    'usa-ca': {
-        'zoom': 6,
-        'co': [34.1022, -118.1577],
-        },
     }
-view = views['usa-ca']
+view = views['palisades']
 
 # Initialize the map centered near Los Angeles
 base_map = folium.Map(location=view['co'], zoom_start=view['zoom'])
@@ -226,13 +218,12 @@ except Exception as e:
 # Add the animation layer to the map
 timestamped_geojson.add_to(base_map)
 
-# Generate static blips
-generate_static_blips()
-
 # Save the map to an HTML file
 base_map.save(output_file)
 print(f"Map saved as {output_file}")
 # Inject custom JavaScript for audio playback
-inject_audio_script(output_file)
-print(f"Map modified for audio playback")
+inject_audio_script(output_file, anim_paused)
+print(f"Map injected for audio")
 
+# Generate static blips
+generate_static_blips()

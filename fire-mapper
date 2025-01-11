@@ -21,17 +21,55 @@
 
 # The above + GNU AFFERO GENERAL PUBLIC LICENSE are found in LICENSE.md
 
+#!/usr/bin/env python3
 import json
 import datetime
 import folium
 from folium.plugins import TimestampedGeoJson
+import argparse
+
+# Default values
+def_days_prior = 10
+def_anim_period = 'PT1H'
+def_output = '/tmp/fire-anim.html'
+available_periods = ['PT1H', 'P1D', 'P1Y']  # Available animation periods
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Generate an animated fire perimeter map.")
+parser.add_argument("-d", "--days-prior", type=int, default=def_days_prior,
+                    help=f"Days prior ({def_days_prior})")
+parser.add_argument("-p", "--anim-period", type=str, default=def_anim_period, choices=available_periods,
+                    help=f"Animation period. Options: {', '.join(available_periods)} (default: {def_anim_period})")
+parser.add_argument("-o", "--output", type=str, default=def_output,
+                    help=f"Output HTML file ({def_output})")
+args = parser.parse_args()
+
+days_prior = args.days_prior
+output_file = args.output
+anim_period = args.anim_period
+
+# Calculate the cutoff timestamp based on days prior
+cutoff_date = datetime.datetime.now() - datetime.timedelta(days=days_prior)
+cutoff_ts = cutoff_date.timestamp()
+
+def format_time(ts_s, period):
+    """Format the timestamp based on the animation period."""
+    return datetime.datetime.fromtimestamp(ts_s).isoformat()
+    if period == 'PT1H':
+        return datetime.datetime.fromtimestamp(ts_s).isoformat()
+    elif period == 'PT1D':
+        return datetime.datetime.fromtimestamp(ts_s).strftime('%Y-%m-%d')
+    elif period == 'P1Y':
+        return datetime.datetime.fromtimestamp(ts_s).strftime('%Y')
+    else:
+        raise ValueError(f"Unsupported animation period: {period}")
 
 # Load the fire perimeter data
-with open("query-to-2025-01-09_23-14pm.json") as F:
+with open("/tmp/fire-query.json") as F:
     data = json.load(F)
 
 views = {
-    'overview': {
+    'sfvalley': {
         'zoom': 11,
         'co': [34.1622, -118.3577],
         },
@@ -39,8 +77,20 @@ views = {
         'zoom': 12,
         'co': [34.1422, -118.4577],
         },
+    'usa-ca-la': {
+        'zoom': 10,
+        'co': [34.1022, -118.1577],
+        },
+    'usa-ca-south': {
+        'zoom': 7,
+        'co': [34.1022, -118.1577],
+        },
+    'usa-ca-south': {
+        'zoom': 6,
+        'co': [34.1022, -118.1577],
+        },
     }
-view = views['palisades']
+view = views['usa-ca-south']
 
 # Initialize the map centered near Los Angeles
 base_map = folium.Map(location=view['co'], zoom_start=view['zoom'])
@@ -61,11 +111,26 @@ while fi >= 0:
     # Extract attributes and geometry
     attr = feature['attributes']
     geo = feature['geometry']
-    ts_s = attr['poly_DateCurrent'] / 1000  # Convert to seconds
+    color = 'red'
+
+    if 'poly_DateCurrent' in attr and attr['poly_DateCurrent'] is not None:
+        ts_s = attr['poly_DateCurrent'] / 1000  # Convert to seconds
+    elif 'EditDate' in attr and attr['EditDate'] is not None:
+        ts_s = attr['EditDate'] / 1000
+        color = 'blue'
+    else:
+        print("No poly_DateCurrent nor EditDate. Examine feature, attr, geo, and attr['poly_DateCurrent']")
+        import ipdb; ipdb.set_trace(context=7); pass
+        pass
+
     date_str = datetime.datetime.fromtimestamp(ts_s).strftime('%Y-%m-%d %H:%M:%S')
     
-    # Stop if the date is before 2025-01-07
-    if ts_s < datetime.datetime(2025, 1, 7).timestamp():
+    # Debug print for timestamp details
+    print(f"Feature timestamp (seconds): {ts_s}, Formatted time: {format_time(ts_s, anim_period)}, Date string: {date_str}")
+
+    # Stop if the date is before the cutoff date
+    if ts_s < cutoff_ts:
+        print(f"Feature timestamp {ts_s} is before cutoff {cutoff_ts}. Skipping.")
         break
     
     # Add each ring as a GeoJSON feature with timestamp
@@ -77,7 +142,7 @@ while fi >= 0:
                 "coordinates": [ring]
             },
             "properties": {
-                "time": datetime.datetime.fromtimestamp(ts_s).isoformat(),  # Add timestamp
+                "time": format_time(ts_s, anim_period),  # Add timestamp
                 "style": {
                     "color": "red",
                     "fillColor": "orange",
@@ -86,22 +151,25 @@ while fi >= 0:
             }
         })
     
-    print(f"Added feature from {date_str} with mission {attr['mission']}")
+    print(f"Added feature from {date_str} with mission {attr.get('mission', 'unknown')}")
 
-    # Increment count and stop after 21 features (if needed)
-    count += 1
-    if count >= 21:
-        break
+# Debug print for GeoJSON features
+print(f"Total GeoJSON features added: {len(geojson_features)}")
 
 # Create a TimestampedGeoJson layer
-timestamped_geojson = TimestampedGeoJson({
-    "type": "FeatureCollection",
-    "features": geojson_features
-}, period="PT1H", add_last_point=True)
+try:
+    timestamped_geojson = TimestampedGeoJson({
+        "type": "FeatureCollection",
+        "features": geojson_features
+    }, period=anim_period, add_last_point=True)
+except Exception as e:
+    print(f"Error creating TimestampedGeoJson: {e}")
+    import ipdb; ipdb.set_trace(context=7); pass
+    pass
 
 # Add the animation layer to the map
 timestamped_geojson.add_to(base_map)
 
 # Save the map to an HTML file
-base_map.save("animated_fire_perimeter_map.html")
-print("Map saved as animated_fire_perimeter_map.html")
+base_map.save(output_file)
+print(f"Map saved as {output_file}")

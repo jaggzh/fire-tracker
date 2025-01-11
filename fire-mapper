@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+# See LICENSE.md
+# This project uses the AGPL-3.0 with additional terms.
+# **Note, especially, the Disclaimer of Information Accuracy!**
+
+# Additional License Terms and Disclaimer
+# 1. **Non-commercial use:** This project is licensed for personal, academic, or other non-commercial purposes at no cost. You may use, modify, and distribute the project under these conditions.
+# 2. **Commercial use:** Commercial use of this project, including but not limited to selling, offering as a service, or integrating into paid products, requires a separate commercial license. To obtain a commercial license, please contact jaggz.h {over at} gmail.com
+# 3. **Attribution:** All use of this project, whether for non-commercial or commercial purposes, must include the following attribution:
+#    - A link to the original project’s GitHub repository: https://github.com/jaggzh/fire-tracker.git
+#    - A link to the official website: https://github.com/jaggzh/fire-tracker/
+#    - A link to the YouTube channel: https://www.youtube.com/@jaggztech
+# 4. **Attribution updates:** If the original project updates its official attribution requirements, including changes to links (e.g., GitHub repository, website, YouTube channel), users must update their attributions to reflect these changes. Updates must be made within 30 days of the new attribution requirements being published, or during the next version update of their derivative works, whichever occurs first.
+# 5. **Modifications:** If you modify this project, you must clearly indicate the changes made and retain all attribution requirements outlined above.
+# 6. **Disclaimer of Information Accuracy:**
+#    - The information generated, prepared, or output by this project may be unreliable, incorrect, incomplete, or contain bugs.
+#    - This project is intended for informational purposes only and should not be relied upon for emergency response, life-saving decisions, or any critical actions.
+#    - Users of this project are solely responsible for verifying the accuracy and suitability of the information for their purposes.
+# 7. **Liability Disclaimer:** This project is provided “as is,” without any warranties, guarantees, or assurances of any kind, express or implied. The author is not liable for any damages, losses, or consequences arising from the use, misuse, or reliance on this project or its outputs.
+# 8. **Termination of License:** Failure to comply with the terms of this license will result in the termination of your rights to use, modify, or distribute this project.
+
+# The above + GNU AFFERO GENERAL PUBLIC LICENSE are found in LICENSE.md
+
+import json
+import datetime
+import folium
+from folium.plugins import TimestampedGeoJson
+
+# Load the fire perimeter data
+with open("query-to-2025-01-09_23-14pm.json") as F:
+    data = json.load(F)
+
+views = {
+    'overview': {
+        'zoom': 11,
+        'co': [34.1622, -118.3577],
+        },
+    'palisades': {
+        'zoom': 12,
+        'co': [34.1422, -118.4577],
+        },
+    }
+view = views['palisades']
+
+# Initialize the map centered near Los Angeles
+base_map = folium.Map(location=view['co'], zoom_start=view['zoom'])
+
+# Initialize variables
+mxf = len(data['features'])  # Max features
+fi = mxf - 1  # Start from the end
+count = 0  # Counter for features processed
+
+# Store features for animation
+geojson_features = []
+
+# Loop through features backward in time
+while fi >= 0:
+    feature = data['features'][fi]
+    fi -= 1  # Move to the previous feature
+    
+    # Extract attributes and geometry
+    attr = feature['attributes']
+    geo = feature['geometry']
+    ts_s = attr['poly_DateCurrent'] / 1000  # Convert to seconds
+    date_str = datetime.datetime.fromtimestamp(ts_s).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Stop if the date is before 2025-01-07
+    if ts_s < datetime.datetime(2025, 1, 7).timestamp():
+        break
+    
+    # Add each ring as a GeoJSON feature with timestamp
+    for ring in geo['rings']:
+        geojson_features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [ring]
+            },
+            "properties": {
+                "time": datetime.datetime.fromtimestamp(ts_s).isoformat(),  # Add timestamp
+                "style": {
+                    "color": "red",
+                    "fillColor": "orange",
+                    "fillOpacity": 0.5
+                }
+            }
+        })
+    
+    print(f"Added feature from {date_str} with mission {attr['mission']}")
+
+    # Increment count and stop after 21 features (if needed)
+    count += 1
+    if count >= 21:
+        break
+
+# Create a TimestampedGeoJson layer
+timestamped_geojson = TimestampedGeoJson({
+    "type": "FeatureCollection",
+    "features": geojson_features
+}, period="PT1H", add_last_point=True)
+
+# Add the animation layer to the map
+timestamped_geojson.add_to(base_map)
+
+# Save the map to an HTML file
+base_map.save("animated_fire_perimeter_map.html")
+print("Map saved as animated_fire_perimeter_map.html")

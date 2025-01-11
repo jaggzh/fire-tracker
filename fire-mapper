@@ -27,11 +27,16 @@ import datetime
 import folium
 from folium.plugins import TimestampedGeoJson
 import argparse
+import os
+import subprocess
 
 # Default values
 def_days_prior = 10
 def_anim_period = 'PT1H'
-def_output = '/tmp/fire-anim.html'
+def_output = 'fire.html'
+def_audio_output_fmt = "au/fire-{freq:02d}.wav"
+def_noise_min_f = 100  # Default minimum frequency for noise
+def_noise_max_f = 1000  # Default maximum frequency for noise
 available_periods = ['PT1H', 'P1D', 'P1Y']  # Available animation periods
 
 # Parse command-line arguments
@@ -55,14 +60,53 @@ cutoff_ts = cutoff_date.timestamp()
 def format_time(ts_s, period):
     """Format the timestamp based on the animation period."""
     return datetime.datetime.fromtimestamp(ts_s).isoformat()
-    if period == 'PT1H':
-        return datetime.datetime.fromtimestamp(ts_s).isoformat()
-    elif period == 'PT1D':
-        return datetime.datetime.fromtimestamp(ts_s).strftime('%Y-%m-%d')
-    elif period == 'P1Y':
-        return datetime.datetime.fromtimestamp(ts_s).strftime('%Y')
-    else:
-        raise ValueError(f"Unsupported animation period: {period}")
+    # No need to chop like this stuff here:
+    # if period == 'PT1H': return datetime.datetime.fromtimestamp(ts_s).isoformat()
+    # elif period == 'PT1D': return datetime.datetime.fromtimestamp(ts_s).strftime('%Y-%m-%d')
+    # elif period == 'P1Y': return datetime.datetime.fromtimestamp(ts_s).strftime('%Y')
+    # else: raise ValueError(f"Unsupported animation period: {period}")
+
+def generate_static_blips():
+    """Generate white noise audio files for different frequency peaks."""
+    for i in range(10):
+        freq = def_noise_min_f + i * (def_noise_max_f - def_noise_min_f) // 9
+        output_path = def_audio_output_fmt.format(freq=i)
+        print(f"Generating static blip for frequency {freq} Hz at {output_path}")
+        subprocess.run([
+            "sox", "-n", output_path,
+            "synth", "0.05", "noise", "vol", "0.5"
+        ])
+    print("Static blips generated.")
+
+def inject_audio_script(output_file):
+    """Inject JavaScript for audio playback into the HTML."""
+    custom_script = """
+    <script>
+    // Preload audio files
+    const audioFiles = [];
+    for (let i = 0; i <= 9; i++) {
+        audioFiles[i] = new Audio(`au/fire-${String(i).padStart(2, '0')}.wav`);
+    }
+
+    // Play audio when a feature is shown
+    function playFeatureAudio(properties) {
+        const audioIndex = parseInt(properties.audio.match(/fire-(\\d{2})\\.wav/)[1], 10);
+        if (audioFiles[audioIndex]) {
+            audioFiles[audioIndex].currentTime = 0; // Restart the audio
+            audioFiles[audioIndex].play();
+        }
+    }
+
+    // Hook into Folium's TimestampedGeoJson events
+    const geoJsonLayer = document.getElementsByClassName('leaflet-timestamped-geojson')[0];
+    geoJsonLayer.addEventListener('change', (event) => {
+        const featureProperties = event.detail.feature.properties;
+        playFeatureAudio(featureProperties);
+    });
+    </script>
+    """
+    with open(output_file, 'a') as f:
+        f.write(custom_script)
 
 # Load the fire perimeter data
 with open("/tmp/fire-query.json") as F:
@@ -85,12 +129,12 @@ views = {
         'zoom': 7,
         'co': [34.1022, -118.1577],
         },
-    'usa-ca-south': {
+    'usa-ca': {
         'zoom': 6,
         'co': [34.1022, -118.1577],
         },
     }
-view = views['usa-ca-south']
+view = views['usa-ca']
 
 # Initialize the map centered near Los Angeles
 base_map = folium.Map(location=view['co'], zoom_start=view['zoom'])
@@ -99,6 +143,11 @@ base_map = folium.Map(location=view['co'], zoom_start=view['zoom'])
 mxf = len(data['features'])  # Max features
 fi = mxf - 1  # Start from the end
 count = 0  # Counter for features processed
+
+# Determine min and max contour lengths for normalization
+contour_lengths = [len(ring) for feature in data['features'] for ring in feature['geometry']['rings']]
+min_length = min(contour_lengths) if contour_lengths else 1
+max_length = max(contour_lengths) if contour_lengths else 1
 
 # Store features for animation
 geojson_features = []
@@ -135,6 +184,12 @@ while fi >= 0:
     
     # Add each ring as a GeoJSON feature with timestamp
     for ring in geo['rings']:
+        # Determine frequency based on contour length
+        length = len(ring)
+        normalized_length = (max_length - length) / (max_length - min_length)
+        freq_index = int(normalized_length * 9)
+        print(f"Ring length: {length}, Normalized: {normalized_length}, Frequency index: {freq_index}")
+        
         geojson_features.append({
             "type": "Feature",
             "geometry": {
@@ -147,7 +202,8 @@ while fi >= 0:
                     "color": "red",
                     "fillColor": "orange",
                     "fillOpacity": 0.5
-                }
+                },
+                "audio": def_audio_output_fmt.format(freq=freq_index)
             }
         })
     
@@ -170,6 +226,13 @@ except Exception as e:
 # Add the animation layer to the map
 timestamped_geojson.add_to(base_map)
 
+# Generate static blips
+generate_static_blips()
+
 # Save the map to an HTML file
 base_map.save(output_file)
 print(f"Map saved as {output_file}")
+# Inject custom JavaScript for audio playback
+inject_audio_script(output_file)
+print(f"Map modified for audio playback")
+
